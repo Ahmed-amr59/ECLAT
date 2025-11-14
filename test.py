@@ -1,108 +1,125 @@
-# simple_eclat_fixed.py
-# Very Simple & Correct ECLAT - No Errors!
-
 import pandas as pd
 from itertools import combinations
 
-# ========================= CONFIG =========================
-filePath = "Horizontal_Format.xlsx"
-minSup = 0.6          # Change here to test
-minCon = 0.7          # Change here to test
-# =========================================================
+file_path = "Horizontal_Format.xlsx"
+min_support_percent = 0.6
+min_confidence = 0.7
 
-# 1. Load data
-data = pd.read_excel(filePath, sheet_name="Sheet1")
+data = pd.read_excel(file_path, sheet_name="Sheet1")
+
 transactions = []
 for index, row in data.iterrows():
-    items = [x.strip() for x in str(row['items']).split(',') if x.strip()]
-    transactions.append(set(items))
+ raw_items = str(row["items"]).split(",")
+ clean_items = []
 
-print(f"Loaded {len(transactions)} transactions\n")
+ for item in raw_items:
+   item = item.strip()
+   if item != "":
+     clean_items.append(item)
 
-# 2. Vertical format: item → tidset
-itemDict = {}
-for tid, trans in enumerate(transactions):
-    for item in trans:
-        if item not in itemDict:
-            itemDict[item] = set()
-        itemDict[item].add(tid)
+ transactions.append(set(clean_items))
 
-# 3. ECLAT Mining
-freqItemSets = {}  # tuple → support
+print("Loaded", len(transactions), "transactions\n")
 
-def eclat(prefix, items_list, prefix_tidset=None):
-    if prefix_tidset is None:
-        # First call: get tidset from first item
-        prefix_tidset = items_list[0][1] if prefix else set()
+min_support_count = int(min_support_percent * len(transactions))
 
-    for i in range(len(items_list)):
-        item, tidset = items_list[i]
-        current_tidset = tidset if prefix == () else prefix_tidset & tidset
-        support = len(current_tidset) / len(transactions)
 
-        if support >= minSup:
-            new_itemset = tuple(sorted(prefix + (item,)))
-            freqItemSets[new_itemset] = support
+item_tidset = {}
 
-            # Build next candidates
-            next_candidates = []
-            for j in range(i + 1, len(items_list)):
-                item2, tidset2 = items_list[j]
-                inter = current_tidset & tidset2
-                if len(inter) / len(transactions) >= minSup:
-                    next_candidates.append((item2, inter))
+for tid, transaction in enumerate(transactions):
+ for item in transaction:
+   if item not in item_tidset:
+     item_tidset[item] = set()
+   item_tidset[item].add(tid)
 
-            if next_candidates:
-                eclat(new_itemset, next_candidates, current_tidset)
+frequent_sets = {} # itemset → support_count
 
-# Start mining
-min_support_count = minSup * len(transactions)
-items_sorted = sorted(itemDict.items(), key=lambda x: len(x[1]), reverse=True)
+def eclat(current_set, candidate_list, current_tidset=None):
 
-print("Starting ECLAT mining...")
-eclat((), items_sorted)
+  if current_tidset is None:
+     current_tidset = set()
 
-# 4. Print Frequent Itemsets
+  for i in range(len(candidate_list)):
+    item_name = candidate_list[i][0]
+    item_tid = candidate_list[i][1]
+
+    if current_set == ():
+       new_tidset = item_tid
+    else:
+       new_tidset = current_tidset.intersection(item_tid)
+
+    support_count = len(new_tidset)
+
+    if support_count >= min_support_count:
+
+      new_itemset = tuple(sorted(current_set + (item_name,)))
+      frequent_sets[new_itemset] = support_count
+
+      next_list = []
+      for j in range(i + 1, len(candidate_list)):
+         next_item = candidate_list[j][0]
+         next_tid = candidate_list[j][1]
+
+         inter_tid = new_tidset.intersection(next_tid)
+         inter_count = len(inter_tid)
+         if inter_count >= min_support_count:
+            next_list.append((next_item, inter_tid))
+
+    if len(next_list) > 0:
+      eclat(new_itemset, next_list, new_tidset)
+
+sorted_items = sorted(item_tidset.items(), key=lambda x: len(x[1]), reverse=True)
+
+print("Starting ECLAT...\n")
+eclat((), sorted_items)
+
 print("\n" + "="*60)
-print("FREQUENT ITEMSETS")
+print("FREQUENT ITEMSETS (Support as Count)")
 print("="*60)
 
-for size in range(1, 10):
-    current = [itemset for itemset in freqItemSets.keys() if len(itemset) == size]
-    if not current:
-        break
-    print(f"\nL{size} ({len(current)} itemsets):")
-    for itemset in sorted(current, key=lambda x: freqItemSets[x], reverse=True):
-        print(f"  {itemset}  →  support = {freqItemSets[itemset]:.3f}")
+level = 1
+while True:
+    level_sets = [s for s in frequent_sets if len(s) == level]
 
-# 5. Print Strong Rules with Lift
+    if len(level_sets) == 0:
+      break
+
+    print("\nL", level, "(", len(level_sets), "itemsets ):")
+    level_sorted = sorted(level_sets, key=lambda x: frequent_sets[x], reverse=True)
+
+    for s in level_sorted:
+       print(" ", s, "→ support_count =", frequent_sets[s])
+
+    level += 1
+
 print("\n" + "="*70)
-print(f"STRONG RULES (min_sup={minSup}, min_conf={minCon})")
+print("STRONG RULES")
 print("="*70)
 
-for itemset in list(freqItemSets.keys()):
-    if len(itemset) < 2:
-        continue
-    for i in range(1, len(itemset)):
-        for subset in combinations(itemset, i):
-            antecedent = tuple(sorted(subset))
-            consequent = tuple(sorted(set(itemset) - set(subset)))
+for itemset in frequent_sets:
+  if len(itemset) < 2:
+     continue
 
-            sup_all = freqItemSets[itemset]
-            sup_ant = freqItemSets.get(antecedent, 0)
-            if sup_ant == 0:
-                continue
+  for k in range(1, len(itemset)):
+     subsets = combinations(itemset, k)
 
-            confidence = sup_all / sup_ant
-            if confidence < minCon:
-                continue
+     for left_side in subsets:
+       left_side = tuple(sorted(left_side))
+       right_side = tuple(sorted(set(itemset) - set(left_side)))
 
-            sup_con = freqItemSets.get(consequent, 0)
-            lift = confidence / sup_con if sup_con > 0 else float('inf')
+       sup_itemset = frequent_sets[itemset]
+       sup_left = frequent_sets.get(left_side, 0)
+       sup_right = frequent_sets.get(right_side, 0)
 
-            print(f"\n{antecedent}  →  {consequent}")
-            print(f"    support     = {sup_all:.3f}")
-            print(f"    confidence  = {confidence:.3f}")
-            print(f"    lift        = {lift:.3f}")
+       if sup_left == 0:
+         continue
 
-print("\nECLAT Completed Successfully!")
+       confidence_value = sup_itemset / sup_left
+
+       if confidence_value >= min_confidence:
+           lift_value = confidence_value / (sup_right / len(transactions)) if sup_right > 0 else 0
+
+           print("\nRule:", left_side, "→", right_side)
+           print(" support_count =", sup_itemset)
+           print(" confidence =", round(confidence_value, 3))
+           print(" lift =", round(lift_value, 3))
